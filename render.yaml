@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: linkedin-profile-api
+    env: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter  # NOT the free plan -- free instances sleep after 15
+                    # minutes idle, which throws away the warm connection
+                    # pool and cache this design depends on for speed.
+    healthCheckPath: /health
+    envVars:
+      - key: LINKEDIN_COOKIE
+        sync: false
+      - key: API_KEY
+        sync: false
+      - key: LOG_LEVEL
+        value: INFO
+      - key: RATE_LIMIT_PER_MINUTE
+        value: "20"

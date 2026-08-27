@@ -1,0 +1,80 @@
+{
+  "data": {
+    "entityUrn": "urn:li:fsd_profile:ACoAAA1jane"
+  },
+  "included": [
+    {
+      "$type": "com.linkedin.voyager.dash.identity.profile.Profile",
+      "entityUrn": "urn:li:fsd_profile:ACoAAA1jane",
+      "publicIdentifier": "jane-doe",
+      "firstName": "Jane",
+      "lastName": "Doe",
+      "headline": "Staff Software Engineer at Example Corp",
+      "locationName": "Bengaluru, Karnataka, India",
+      "summary": "I build reliable distributed systems.",
+      "profilePicture": {
+        "rootUrl": "https://media.licdn.com/dms/image/root/",
+        "artifacts": [
+          {"width": 100, "fileIdentifyingUrlPathSegment": "100x100.jpg"},
+          {"width": 400, "fileIdentifyingUrlPathSegment": "400x400.jpg"}
+        ]
+      }
+    },
+    {
+      "$type": "com.linkedin.voyager.dash.identity.profile.Position",
+      "entityUrn": "urn:li:fsd_position:1",
+      "*profile": "urn:li:fsd_profile:ACoAAA1jane",
+      "title": "Staff Software Engineer",
+      "companyName": "Example Corp",
+      "locationName": "Bengaluru, India",
+      "description": "Leading the platform reliability team.",
+      "dateRange": {"start": {"year": 2022, "month": 3}, "current": true}
+    },
+    {
+      "$type": "com.linkedin.voyager.dash.identity.profile.Position",
+      "entityUrn": "urn:li:fsd_position:2",
+      "*profile": "urn:li:fsd_profile:ACoAAA1jane",
+      "title": "Software Engineer",
+      "companyName": "Prior Co",
+      "locationName": "Remote",
+      "description": "Built the payments service.",
+      "dateRange": {"start": {"year": 2019, "month": 7}, "end": {"year": 2022, "month": 2}}
+    },
+    {
+      "$type": "com.linkedin.voyager.dash.identity.profile.Education",
+      "entityUrn": "urn:li:fsd_education:1",
+      "*profile": "urn:li:fsd_profile:ACoAAA1jane",
+      "schoolName": "Indian Institute of Technology",
+      "degreeName": "Bachelor of Technology",
+      "fieldOfStudy": "Computer Science",
+      "dateRange": {"start": {"year": 2015}, "end": {"year": 2019}}
+    },
+    {
+      "$type": "com.linkedin.voyager.dash.identity.profile.Skill",
+      "entityUrn": "urn:li:fsd_skill:1",
+      "name": "Distributed Systems",
+      "endorsementCount": 58
+    },
+    {
+      "$type": "com.linkedin.voyager.dash.identity.profile.Skill",
+      "entityUrn": "urn:li:fsd_skill:2",
+      "name": "Python",
+      "endorsementCount": 71
+    },
+    {
+      "$type": "com.linkedin.voyager.dash.identity.profile.Certification",
+      "entityUrn": "urn:li:fsd_certification:1",
+      "name": "AWS Certified Solutions Architect",
+      "authority": "Amazon Web Services",
+      "issueDate": {"year": 2021, "month": 6},
+      "expirationDate": {"year": 2024, "month": 6},
+      "credentialUrl": "https://www.credly.com/badges/example"
+    },
+    {
+      "$type": "com.linkedin.voyager.dash.identity.profile.Language",
+      "entityUrn": "urn:li:fsd_language:1",
+      "name": "English",
+      "proficiency": "NATIVE_OR_BILINGUAL"
+    }
+  ]
+}
