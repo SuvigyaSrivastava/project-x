@@ -78,15 +78,26 @@ export class ProfileService {
       this.breaker.recordSuccess();
     }
 
-    const { data, warnings } = parseMwliteHtml(html, publicIdentifier, profileUrl);
+    const { data, warnings, resolvedIdentifier } = parseMwliteHtml(html, publicIdentifier, profileUrl);
 
     // Identity verification: the parsed page should describe the profile we
-    // asked for. mwlite doesn't expose a reliable per-profile id (see
-    // parse.ts), so this checks the one signal that *is* reliable -- the
-    // page actually resolved (a name was found) rather than landing on an
-    // error/login page that happened to return 200.
+    // asked for, not just have returned 200. Two checks, matching how
+    // confident each signal is:
+    //   1. A name was found at all -- catches landing on an error/login
+    //      page that still returned 200.
+    //   2. If the page carries a canonical/og:url tag, it must match the
+    //      identifier we requested -- catches silently getting served a
+    //      *different* profile's data. This is a hard reject, not a
+    //      warning: returning the wrong person's data is worse than
+    //      returning an error.
     if (!data.fullName) {
       warnings.push("No name could be parsed from the response -- treat this result as unverified.");
+    }
+    if (resolvedIdentifier && resolvedIdentifier !== publicIdentifier.toLowerCase()) {
+      throw Errors.linkedInError(
+        `Identity check failed: requested '${publicIdentifier}' but the page's own canonical URL resolved to ` +
+          `'${resolvedIdentifier}'. Refusing to return data for the wrong profile.`
+      );
     }
 
     if (!env.MOCK_MODE && data.profilePicture === null) {

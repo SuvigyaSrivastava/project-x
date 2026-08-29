@@ -78,6 +78,19 @@ test("unknown route returns 404 ROUTE_NOT_FOUND with the standard envelope", asy
   assert.ok(body.error.requestId);
 });
 
+test("requesting a different slug than the page's own canonical identity is rejected, not silently returned", async () => {
+  // The bundled fixture's canonical link resolves to 'ada-lovelace'.
+  // Requesting a different slug against it (MOCK_MODE always serves the
+  // same fixture) must be rejected rather than silently handed back as if
+  // it were the right person's data.
+  const res = await fetch(`${baseUrl}/api/profile?url=${encodeURIComponent("https://www.linkedin.com/in/someone-else")}&refresh=true`);
+  assert.equal(res.status, 502);
+  const body = await res.json();
+  assert.equal(body.success, false);
+  assert.equal(body.error.code, "LINKEDIN_ERROR");
+  assert.match(body.error.message, /[Ii]dentity check failed/);
+});
+
 test("repeated calls for the same profile are served from cache", async () => {
   const first = await fetch(`${baseUrl}/api/profile?url=${encodeURIComponent("https://www.linkedin.com/in/ada-lovelace")}&refresh=true`);
   const firstBody = await first.json();

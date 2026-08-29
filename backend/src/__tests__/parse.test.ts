@@ -86,3 +86,27 @@ test("a page with no profile content produces warnings but does not throw", () =
   assert.equal(data.fullName, null);
   assert.ok(warnings.length > 0);
 });
+
+test("resolves the page's own identity from its canonical link", () => {
+  const html = `<html><head><link rel="canonical" href="https://www.linkedin.com/in/ada-lovelace/"></head><body><h1>Ada Lovelace</h1></body></html>`;
+  const { resolvedIdentifier } = parseMwliteHtml(html, "ada-lovelace", "https://www.linkedin.com/in/ada-lovelace");
+  assert.equal(resolvedIdentifier, "ada-lovelace");
+});
+
+test("resolves identity from og:url when there's no canonical link", () => {
+  const html = `<html><head><meta property="og:url" content="https://www.linkedin.com/in/ada-lovelace"></head><body><h1>Ada Lovelace</h1></body></html>`;
+  const { resolvedIdentifier } = parseMwliteHtml(html, "ada-lovelace", "https://www.linkedin.com/in/ada-lovelace");
+  assert.equal(resolvedIdentifier, "ada-lovelace");
+});
+
+test("resolvedIdentifier is null, with a warning, when neither tag is present", () => {
+  const html = `<html><body><h1>No Canonical Tag</h1></body></html>`;
+  const { resolvedIdentifier, warnings } = parseMwliteHtml(html, "someone", "https://www.linkedin.com/in/someone");
+  assert.equal(resolvedIdentifier, null);
+  assert.ok(warnings.some((w) => w.includes("identity check skipped")));
+});
+
+test("the bundled fixture resolves its own canonical identity", () => {
+  const { resolvedIdentifier } = parseFixture();
+  assert.equal(resolvedIdentifier, "ada-lovelace");
+});

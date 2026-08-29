@@ -359,6 +359,34 @@ function parseSimpleSection($: CheerioAPI, root: C, sectionSel: string): SimpleT
 export interface ParsedProfile {
   data: ProfileData;
   warnings: string[];
+  /** The public identifier extracted from the page's own canonical link /
+   * og:url, if present -- used by ProfileService to verify the page
+   * actually describes the profile that was requested, rather than trusting
+   * a 200 status alone. null when the page carried no such tag (not
+   * treated as a mismatch by itself -- see service.ts). */
+  resolvedIdentifier: string | null;
+}
+
+/** Pull a `/in/<slug>` identifier out of a LinkedIn URL found in canonical
+ * or og:url meta tags. Deliberately narrow -- only used to confirm the
+ * page's own claimed identity, never to derive one from nothing. */
+function extractIdentifierFromLinkedInUrl(url: string): string | null {
+  const m = url.match(/linkedin\.com\/in\/([^/?#]+)/i);
+  return m ? decodeURIComponent(m[1] as string).toLowerCase() : null;
+}
+
+function resolvePageIdentifier($: CheerioAPI): string | null {
+  const canonical = $('link[rel="canonical"]').attr("href");
+  if (canonical) {
+    const id = extractIdentifierFromLinkedInUrl(canonical);
+    if (id) return id;
+  }
+  const ogUrl = $('meta[property="og:url"]').attr("content");
+  if (ogUrl) {
+    const id = extractIdentifierFromLinkedInUrl(ogUrl);
+    if (id) return id;
+  }
+  return null;
 }
 
 export function parseMwliteHtml(html: string, publicIdentifier: string, profileUrl: string): ParsedProfile {
@@ -370,6 +398,11 @@ export function parseMwliteHtml(html: string, publicIdentifier: string, profileU
     warnings.push("Could not find a name element -- LinkedIn may have changed mwlite's markup, or this page is a login/error page.");
   }
 
+  const resolvedIdentifier = resolvePageIdentifier($);
+  if (!resolvedIdentifier) {
+    warnings.push("Page carried no canonical/og:url tag to confirm its identity against -- identity check skipped for this response.");
+  }
+
   const fullName = text($(SEL.name));
   const [firstName, ...rest] = (fullName ?? "").split(" ");
   const lastName = rest.length > 0 ? rest.join(" ") : null;
@@ -378,6 +411,7 @@ export function parseMwliteHtml(html: string, publicIdentifier: string, profileU
 
   return {
     warnings,
+    resolvedIdentifier,
     data: {
       publicIdentifier,
       profileUrl,

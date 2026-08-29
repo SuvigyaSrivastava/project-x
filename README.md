@@ -242,7 +242,7 @@ backend/
       service.ts                orchestration: breaker -> pacing -> cache -> fetch -> parse
     utils/                      circuitBreaker, tokenBucket, ttlCache, logger, apiError
     types/profile.ts            the public response schema
-    __tests__/                  28 tests: url parsing, HTML parsing, HTTP API
+    __tests__/                  36 tests: url parsing, HTML parsing, HTTP API, architecture guard
 
 frontend/
   src/app/page.tsx              the search page
@@ -267,7 +267,7 @@ docker run -p 4000:4000 --env-file .env linkedin-profile-api
 
 ```bash
 cd backend
-npm test        # 28 tests: URL parsing, HTML parsing, HTTP API -- offline, no credentials
+npm test        # 36 tests: URL parsing, HTML parsing, HTTP API, architecture guard -- offline, no credentials
 npm run typecheck
 npm run build    # tsc compiles cleanly
 ```
