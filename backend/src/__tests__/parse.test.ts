@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { parseMwliteHtml } from "../linkedin/parse";
+import { parseMwliteHtml, extractIdentifierFromLinkedInUrl } from "../linkedin/parse";
 
 const fixture = readFileSync(path.join(__dirname, "..", "..", "fixtures", "profile.html"), "utf-8");
 
@@ -109,4 +109,23 @@ test("resolvedIdentifier is null, with a warning, when neither tag is present", 
 test("the bundled fixture resolves its own canonical identity", () => {
   const { resolvedIdentifier } = parseFixture();
   assert.equal(resolvedIdentifier, "ada-lovelace");
+});
+
+// extractIdentifierFromLinkedInUrl is also the tool ProfileService uses on
+// the *response URL itself* (independent of anything inside the HTML) as a
+// second identity signal -- added after live traffic showed mwlite pages
+// that return 200 with neither a canonical nor an og:url tag, which left
+// the HTML-based check with nothing to verify against. See service.ts.
+test("extractIdentifierFromLinkedInUrl reads the slug out of a profile URL", () => {
+  assert.equal(extractIdentifierFromLinkedInUrl("https://www.linkedin.com/in/ada-lovelace/"), "ada-lovelace");
+  assert.equal(extractIdentifierFromLinkedInUrl("https://www.linkedin.com/in/Ada-Lovelace"), "ada-lovelace");
+  assert.equal(
+    extractIdentifierFromLinkedInUrl("https://www.linkedin.com/in/ada-lovelace?trk=nav_responsive"),
+    "ada-lovelace"
+  );
+});
+
+test("extractIdentifierFromLinkedInUrl returns null for a URL with no /in/ slug", () => {
+  assert.equal(extractIdentifierFromLinkedInUrl("https://www.linkedin.com/feed/"), null);
+  assert.equal(extractIdentifierFromLinkedInUrl("https://www.linkedin.com/company/microsoft"), null);
 });

@@ -370,7 +370,7 @@ export interface ParsedProfile {
 /** Pull a `/in/<slug>` identifier out of a LinkedIn URL found in canonical
  * or og:url meta tags. Deliberately narrow -- only used to confirm the
  * page's own claimed identity, never to derive one from nothing. */
-function extractIdentifierFromLinkedInUrl(url: string): string | null {
+export function extractIdentifierFromLinkedInUrl(url: string): string | null {
   const m = url.match(/linkedin\.com\/in\/([^/?#]+)/i);
   return m ? decodeURIComponent(m[1] as string).toLowerCase() : null;
 }
