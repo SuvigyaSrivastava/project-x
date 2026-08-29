@@ -12,12 +12,31 @@
  * Every field degrades to null/[] instead of throwing. A LinkedIn redesign
  * should mean thinner data, not a 500.
  *
- * HONESTY NOTE: the selectors below are modeled on the documented shape of
- * mwlite (semantic container classes + tracking attributes), not yet
- * confirmed against a live-captured page from this project's own account.
- * They're deliberately kept as named constants at the top of this file so
- * a correction, once verified, is a small diff here -- not a rewrite. See
- * README "Known limitations".
+ * VERIFIED 2026-08-29 against one live-captured mwlite page (own throwaway
+ * account, target profile consented to be public). Confirmed correct as
+ * originally guessed: .experience-container / .education-container /
+ * .skills-list / .summary-container / .dot-separator / data-tracking-
+ * control-name / data-delayed-url lazy images. Corrected after the capture
+ * (see git history for the prior, wrong guesses): the topcard doesn't use
+ * BEM-style .profile-topcard__* classes at all -- it's built from generic
+ * utility classes (body-small, text-color-text, ...) with no unique hook
+ * for headline/location beyond which combination of utility classes is
+ * present. Experience/education items are nested `li.profile-entity-lockup`
+ * (not `.experience-item`), and neither has a stable date-range class --
+ * the date is just another `.body-small` sibling, told apart from the
+ * company/degree line by which one *looks like* a date (see
+ * parseDateRangeText below). Certifications/languages/projects/etc weren't
+ * present on the one profile captured, so those selectors are still
+ * unconfirmed guesses -- left as-is rather than invented from zero evidence.
+ *
+ * ONE IMPORTANT CATCH found in the capture: the page embeds the *viewer's*
+ * own nav-bar avatar (alt="<viewer name> Profile picture") before the
+ * subject's own photo (alt="Profile picture of <subject name>"). A naive
+ * "first image pointing at media.licdn.com" selector would silently return
+ * the wrong person's photo. avatar below is scoped specifically to that alt
+ * prefix for that reason. The background/cover photo has no equivalent
+ * marker to disambiguate viewer vs. subject in what was captured, so it's
+ * left null rather than risk the same mistake -- see parseMwliteHtml.
  */
 import * as cheerio from "cheerio";
 import type { CheerioAPI, Cheerio } from "cheerio";
@@ -37,20 +56,31 @@ import type {
 
 type C = Cheerio<AnyNode>;
 
-// --- selectors (TODO: verify against a live capture) -----------------------
 const SEL = {
-  name: ".profile-topcard__name, h1[data-generated-suggestion-target], h1.pv-text-details__title, h1",
-  headline: ".profile-topcard__headline, .pv-text-details__headline",
-  locationAndFollowers: ".profile-topcard__location, .pv-text-details__location",
-  summary: ".summary-container .summary-text, #about + * .inline-show-more-text, .core-section-container__content p",
-  avatar: ".profile-photo, .presence-entity__image, img.profile-photo-edit__preview",
-  background: ".profile-background-image img, .cover-img img",
-  experienceContainer: ".experience-container, section#experience-section, section[data-section='experience']",
-  experienceItem: "li.experience-item, .profile-section-card, .artdeco-list__item",
-  educationContainer: ".education-container, section#education-section, section[data-section='education']",
-  educationItem: "li.education-item, .profile-section-card, .artdeco-list__item",
-  skillsList: ".skills-list, section#skills-section",
-  skillItem: "li, .pv-skill-entity",
+  name: "h1",
+  // First `.body-small.text-color-text` in the topcard block -- the "low
+  // emphasis" variant is a *different* class token (school/location lines),
+  // so this doesn't collide with them.
+  headline: "div.body-small.text-color-text",
+  // The low-emphasis div that specifically contains the follower/connection
+  // count span -- there are two such divs (school+company, location), this
+  // scopes to the right one via :has().
+  locationAndFollowersDiv: "div.body-small.text-color-text-low-emphasis:has(.member-connection-info)",
+  followersSpan: ".member-connection-info",
+  summary: ".summary-container .description",
+  // Scoped to the confirmed alt-text prefix so this can't grab the
+  // viewer's own nav-bar avatar instead of the subject's -- see module
+  // docstring.
+  avatar: 'img[alt^="Profile picture of "]',
+  experienceContainer: ".experience-container",
+  experiencePositionLink: "a[data-tracking-control-name='profile-position']",
+  educationContainer: ".education-container",
+  educationLink: "a[data-tracking-control-name='view-education']",
+  skillsList: ".skills-list",
+  skillItem: "li.skill-item",
+  // Unconfirmed -- not present on the one profile captured live. Left as
+  // best-effort guesses rather than invented from zero evidence; see
+  // module docstring.
   certificationsSection: ".accomplishment-type.certifications-section, section#certifications-section",
   languagesSection: ".accomplishment-type.languages-section, section#languages-section",
   projectsSection: ".accomplishment-type.projects-section, section#projects-section",
@@ -61,13 +91,9 @@ const SEL = {
   publicationsSection: ".accomplishment-type.publications-section, section#publications-section",
   patentsSection: ".accomplishment-type.patents-section, section#patents-section",
   testScoresSection: ".accomplishment-type.test-scores-section, section#test-scores-section",
-  entryTitle: ".entity-title, .item-title, h3",
-  entrySubtitle: ".entity-subtitle, .item-subtitle, h4",
-  entryDateRange: ".date-range, .entity-date-range, time",
+  entryTitle: "div.body-medium-bold.list-item-heading, .entity-title, .item-title, h3",
+  entryBodySmall: "div.body-small",
   entryDescription: ".entity-description, .show-more-less-text, p",
-  entryLogo: "img",
-  positionLink: "a[data-tracking-control-name='profile-position']",
-  educationLink: "a[data-tracking-control-name='profile-education']",
   dotSeparator: ".dot-separator",
 };
 
@@ -147,20 +173,31 @@ function parseDateRangeText(raw: string | null): DateRange | null {
   return { start, end, isCurrent, text: cleaned, durationMonths };
 }
 
+function looksLikeDate(s: string | null): boolean {
+  if (!s) return false;
+  return YEAR_RE.test(s) || PRESENT_RE.test(s);
+}
+
 function parseLocationAndFollowers($: CheerioAPI, root: C): { location: Location; followersCount: number | null } {
-  // Location shares its element with follower/connection counts, e.g.
-  // "Seattle, Washington, United States 40,604,066 followers" -- pull the
-  // counts out by pattern, keep the remainder as location.
-  const raw = text(root.find(SEL.locationAndFollowers));
+  const div = root.find(SEL.locationAndFollowersDiv).first();
   const location: Location = { full: null, country: null, countryCode: null, postalCode: null };
   let followersCount: number | null = null;
-  if (!raw) return { location, followersCount };
+  if (div.length === 0) return { location, followersCount };
 
-  const followerMatch = raw.match(/([\d,]+)\s*followers?/i);
-  if (followerMatch) {
-    followersCount = parseInt((followerMatch[1] as string).replace(/,/g, ""), 10);
+  const followerText = text(div.find(SEL.followersSpan));
+  if (followerText) {
+    const followerMatch = followerText.match(/([\d,]+)/);
+    if (followerMatch) followersCount = parseInt((followerMatch[1] as string).replace(/,/g, ""), 10);
   }
-  const remainder = raw.replace(/[\d,]+\s*followers?/i, "").replace(/[\d,]+\s*connections?/i, "").trim();
+
+  // The location itself is the div's own text minus the follower span's
+  // text and the dot separator between them.
+  normalizeDotSeparators($, div);
+  const full = text(div);
+  const remainder = (full ?? "")
+    .replace(followerText ?? "", "")
+    .replace(/·\s*$/, "")
+    .trim();
   if (remainder) {
     location.full = remainder;
     const parts = remainder.split(",").map((p) => p.trim());
@@ -171,31 +208,68 @@ function parseLocationAndFollowers($: CheerioAPI, root: C): { location: Location
 
 function parseTimelineEntry($: CheerioAPI, el: C): SimpleTimelineEntry {
   normalizeDotSeparators($, el);
+  const bodySmalls = el.find(SEL.entryBodySmall);
+  let dateText: string | null = null;
+  bodySmalls.each((_, node) => {
+    const t = text($(node));
+    if (!dateText && looksLikeDate(t)) dateText = t;
+  });
   return {
     title: text(el.find(SEL.entryTitle)),
     description: text(el.find(SEL.entryDescription)),
     url: el.find("a").first().attr("href") ?? null,
-    dateRange: parseDateRangeText(text(el.find(SEL.entryDateRange))),
+    dateRange: parseDateRangeText(dateText),
+  };
+}
+
+/** Shared shape for experience/education "entity lockup" entries: a title,
+ * one or more `.body-small` lines where exactly one *looks like* a date
+ * (see module docstring -- there's no dedicated date-range class), a logo,
+ * and a link. Which `.body-small` is the date is told apart by content,
+ * not position -- the other one is the company/degree line. */
+function parseLockupEntry($: CheerioAPI, link: C): { title: string | null; subtitleText: string | null; dateText: string | null; logo: ImageAsset | null; href: string | null } {
+  // Scope to the anchor if it wraps the whole entry (confirmed for
+  // experience); otherwise fall back to the anchor's own containing `li`.
+  const scope = link.find("div.body-small").length > 0 ? link : link.closest("li");
+  normalizeDotSeparators($, scope);
+
+  const title = text(scope.find(SEL.entryTitle));
+  let dateText: string | null = null;
+  let subtitleText: string | null = null;
+  scope.find("div.body-small").each((_, node) => {
+    const t = text($(node));
+    if (looksLikeDate(t)) {
+      if (!dateText) dateText = t;
+    } else if (!subtitleText && t) {
+      subtitleText = t;
+    }
+  });
+
+  return {
+    title,
+    subtitleText,
+    dateText,
+    logo: parseImage($, scope.find("img").first()),
+    href: link.attr("href") ?? null,
   };
 }
 
 function parseExperience($: CheerioAPI, root: C): ExperienceEntry[] {
   const out: ExperienceEntry[] = [];
-  root.find(SEL.experienceContainer).find(SEL.experienceItem).each((_, node) => {
-    const el = $(node);
-    normalizeDotSeparators($, el);
-    const link = el.find(SEL.positionLink).first();
-    const subtitle = text(el.find(SEL.entrySubtitle));
-    const [companyName, employmentType] = (subtitle ?? "").split("·").map((s) => s.trim());
+  root.find(SEL.experienceContainer).find(SEL.experiencePositionLink).each((_, node) => {
+    const link = $(node);
+    const { title, subtitleText, dateText, logo, href } = parseLockupEntry($, link);
     out.push({
-      title: text(el.find(SEL.entryTitle)),
-      companyName: companyName || null,
-      companyLinkedInUrl: link.attr("href") ? new URL(link.attr("href") as string, "https://www.linkedin.com").toString() : null,
-      companyLogo: parseImage($, el.find(SEL.entryLogo)),
-      employmentType: employmentType || null,
-      location: text(el.find(".entity-location, .item-location")),
-      description: text(el.find(SEL.entryDescription)),
-      dateRange: parseDateRangeText(text(el.find(SEL.entryDateRange))),
+      title,
+      companyName: subtitleText,
+      companyLinkedInUrl: href ? new URL(href, "https://www.linkedin.com").toString() : null,
+      companyLogo: logo,
+      // Not present in the one entry captured live -- no reliable selector
+      // confirmed yet, left null rather than guessed.
+      employmentType: null,
+      location: null,
+      description: text(link.closest("li").find(SEL.entryDescription)),
+      dateRange: parseDateRangeText(dateText),
     });
   });
   return out;
@@ -203,18 +277,19 @@ function parseExperience($: CheerioAPI, root: C): ExperienceEntry[] {
 
 function parseEducation($: CheerioAPI, root: C): EducationEntry[] {
   const out: EducationEntry[] = [];
-  root.find(SEL.educationContainer).find(SEL.educationItem).each((_, node) => {
-    const el = $(node);
-    normalizeDotSeparators($, el);
-    const subtitle = text(el.find(SEL.entrySubtitle));
-    const [degreeName, fieldOfStudy] = (subtitle ?? "").split("·").map((s) => s.trim());
-    out.push({
-      schoolName: text(el.find(SEL.entryTitle)),
-      degreeName: degreeName || null,
-      fieldOfStudy: fieldOfStudy || null,
-      grade: text(el.find(".entity-grade, .item-grade")),
-      schoolLogo: parseImage($, el.find(SEL.entryLogo)),
-      dateRange: parseDateRangeText(text(el.find(SEL.entryDateRange))),
+  root.find(SEL.educationContainer).find(SEL.educationLink).each((_, node) => {
+    const link = $(node);
+    const { title, subtitleText, dateText, logo } = parseLockupEntry($, link);
+    return void out.push({
+      schoolName: title,
+      // Extrapolated from experience's confirmed structure (same "entity
+      // lockup" component family) -- not independently confirmed for
+      // education specifically. See module docstring.
+      degreeName: subtitleText,
+      fieldOfStudy: null,
+      grade: null,
+      schoolLogo: logo,
+      dateRange: parseDateRangeText(dateText),
     });
   });
   return out;
@@ -225,12 +300,12 @@ function parseSkills($: CheerioAPI, root: C): SkillEntry[] {
   const seen = new Set<string>();
   root.find(SEL.skillsList).find(SEL.skillItem).each((_, node) => {
     const el = $(node);
-    const name = text(el.find(".skill-name, .pv-skill-entity__skill-name")) ?? text(el);
+    const name = text(el.find("span[dir='ltr']")) ?? text(el);
     if (!name || seen.has(name)) return;
     seen.add(name);
-    const endorsementText = text(el.find(".skill-endorsement-count"));
-    const endorsementCount = endorsementText ? parseInt(endorsementText.replace(/[^\d]/g, ""), 10) || null : null;
-    out.push({ name, endorsementCount });
+    // No endorsement count observed on the one profile captured live --
+    // left null rather than guessed. See module docstring.
+    out.push({ name, endorsementCount: null });
   });
   return out;
 }
@@ -240,11 +315,22 @@ function parseCertifications($: CheerioAPI, root: C): CertificationEntry[] {
   root.find(SEL.certificationsSection).find("li, .accomplishment-entry").each((_, node) => {
     const el = $(node);
     normalizeDotSeparators($, el);
+    const bodySmalls = el.find(SEL.entryBodySmall);
+    let dateText: string | null = null;
+    let authority: string | null = null;
+    bodySmalls.each((_i, bs) => {
+      const t = text($(bs));
+      if (looksLikeDate(t)) {
+        if (!dateText) dateText = t;
+      } else if (!authority && t) {
+        authority = t;
+      }
+    });
     out.push({
       name: text(el.find(SEL.entryTitle)) ?? text(el),
-      authority: text(el.find(SEL.entrySubtitle)),
+      authority,
       url: el.find("a").first().attr("href") ?? null,
-      dateRange: parseDateRangeText(text(el.find(SEL.entryDateRange))),
+      dateRange: parseDateRangeText(dateText),
     });
   });
   return out;
@@ -257,7 +343,7 @@ function parseLanguages($: CheerioAPI, root: C): LanguageEntry[] {
     normalizeDotSeparators($, el);
     const name = text(el.find(SEL.entryTitle)) ?? text(el);
     if (!name) return;
-    out.push({ name, proficiency: text(el.find(SEL.entrySubtitle)) });
+    out.push({ name, proficiency: text(el.find(SEL.entryBodySmall)) });
   });
   return out;
 }
@@ -298,13 +384,15 @@ export function parseMwliteHtml(html: string, publicIdentifier: string, profileU
       firstName: fullName ? firstName ?? null : null,
       lastName,
       fullName,
-      headline: text($(SEL.headline)),
+      headline: text($(SEL.headline).first()),
       summary: text($(SEL.summary)),
       location,
       followersCount,
       connectionsCount: null,
-      profilePicture: parseImage($, $(SEL.avatar)),
-      backgroundPicture: parseImage($, $(SEL.background)),
+      profilePicture: parseImage($, $(SEL.avatar).first()),
+      // Left null rather than guessed -- see module docstring on the
+      // viewer-vs-subject image mixup risk.
+      backgroundPicture: null,
       experience: parseExperience($, root),
       education: parseEducation($, root),
       skills: parseSkills($, root),

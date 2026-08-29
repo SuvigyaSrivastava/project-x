@@ -3,85 +3,92 @@
 <head><meta charset="utf-8"><title>Ada Lovelace | LinkedIn</title></head>
 <body>
   <main>
+    <!-- viewer's own nav avatar -- must NOT be picked up as the subject's photo -->
+    <img class="artdeco-entity-image artdeco-entity-image--circle-1" src="https://static.licdn.com/placeholder-grey.png"
+         data-delayed-url="https://media.licdn.com/dms/image/v2/viewer-nav/profile-displayphoto/original.jpg"
+         alt="Suvigya undefined Profile picture" />
+
     <section class="profile-topcard">
-      <img class="profile-photo" src="https://static.licdn.com/placeholder-grey.png"
-           data-delayed-url="https://media.licdn.com/dms/image/v2/ada-photo/profile-displayphoto/original.jpg" />
-      <img class="cover-img" src="https://static.licdn.com/placeholder-grey.png"
-           data-delayed-url="https://media.licdn.com/dms/image/v2/ada-bg/background/original.jpg" />
-      <h1 class="profile-topcard__name">Ada Lovelace</h1>
-      <div class="profile-topcard__headline">Mathematician &amp; Writer, Analytical Engine Program Notes</div>
-      <div class="profile-topcard__location">London Area, United Kingdom <span class="dot-separator"></span> 12,345 followers</div>
-      <div class="distance-badge">2nd</div>
+      <img class="inline-block relative hue-web-entity__image rounded-[50%] w-16 h-16 img-outline"
+           src="https://static.licdn.com/placeholder-grey.png"
+           data-delayed-url="https://media.licdn.com/dms/image/v2/ada-photo/profile-displayphoto/original.jpg"
+           alt="Profile picture of Ada Lovelace" />
+      <h1>Ada Lovelace</h1>
+      <div class="body-small text-color-text"><span dir="ltr">Mathematician &amp; Writer, Analytical Engine Program Notes</span></div>
+      <div class="body-small text-color-text-low-emphasis">
+        <span dir="ltr">Private tutoring under Mary Somerville</span>
+        <span class="dot-separator" aria-hidden="true"></span>
+        <span class="member-current-company" dir="ltr">Analytical Engine Project</span>
+      </div>
+      <div class="body-small text-color-text-low-emphasis">
+        London Area, United Kingdom
+        <span class="dot-separator" aria-hidden="true"></span>
+        <span class="member-connection-info">12,345 followers</span>
+      </div>
     </section>
 
-    <section class="summary-container">
-      <div class="summary-text">Working at the intersection of mathematics and computing since 1843.</div>
+    <section class="summary-container mr-2">
+      <div class="relative truncated-summary">
+        <div class="body-small text-color-text whitespace-pre-line description truncated">Working at the intersection of mathematics and computing since 1843.</div>
+      </div>
     </section>
 
-    <section id="experience-section" class="experience-container">
-      <li class="experience-item">
-        <img src="https://static.licdn.com/placeholder-grey.png"
-             data-delayed-url="https://media.licdn.com/dms/image/v2/analytical-engine/company-logo/original.jpg" />
-        <h3 class="entity-title">Lead Programmer</h3>
-        <a data-tracking-control-name="profile-position" href="/company/analytical-engine">
-          <h4 class="entity-subtitle">Analytical Engine Project<span class="dot-separator"></span>Full-time</h4>
-        </a>
-        <div class="entity-location">London, England</div>
-        <time class="date-range">Jun 1843 - Present <span class="dot-separator"></span> 183 yrs 2 mos</time>
-        <p class="entity-description">Wrote the first published algorithm intended for implementation on a computer.</p>
-      </li>
-      <li class="experience-item">
-        <h3 class="entity-title">Collaborator</h3>
-        <h4 class="entity-subtitle">Charles Babbage's Workshop<span class="dot-separator"></span>Part-time</h4>
-        <time class="date-range">1840 - 1843</time>
-        <p class="entity-description">Translated and annotated Menabrea's memoir on the Analytical Engine.</p>
-      </li>
+    <section class="experience-container">
+      <h2>Experience</h2>
+      <ol>
+        <li class="profile-entity-lockup">
+          <a href="/company/analytical-engine" data-tracking-control-name="profile-position">
+            <figure><img src="https://static.licdn.com/placeholder-grey.png"
+                 data-delayed-url="https://media.licdn.com/dms/image/v2/analytical-engine/company-logo/original.jpg" alt="Logo of Analytical Engine Project" /></figure>
+            <div class="body-medium-bold list-item-heading"><span dir="ltr">Lead Programmer</span></div>
+            <div class="body-small"><span dir="ltr">Analytical Engine Project</span></div>
+            <div class="body-small">
+              <span class="body-small">Jun 1843 - </span><span class="body-small">Present</span>
+              <span class="dot-separator" aria-hidden="true"></span>
+              <span>183 yrs 2 mos</span>
+            </div>
+          </a>
+        </li>
+        <li class="profile-entity-lockup">
+          <a href="/company/babbage-workshop" data-tracking-control-name="profile-position">
+            <div class="body-medium-bold list-item-heading"><span dir="ltr">Collaborator</span></div>
+            <div class="body-small"><span dir="ltr">Charles Babbage's Workshop</span></div>
+            <div class="body-small"><span class="body-small">1840 - 1843</span></div>
+          </a>
+        </li>
+      </ol>
     </section>
 
-    <section id="education-section" class="education-container">
-      <li class="education-item">
-        <img src="https://static.licdn.com/placeholder-grey.png"
-             data-delayed-url="https://media.licdn.com/dms/image/v2/private-tutoring/school-logo/original.jpg" />
-        <h3 class="entity-title">Private tutoring under Mary Somerville</h3>
-        <h4 class="entity-subtitle">Mathematics<span class="dot-separator"></span>Advanced study</h4>
-        <div class="entity-grade">Distinction</div>
-        <time class="date-range">1832 - 1840</time>
-      </li>
+    <section class="education-container">
+      <h2>Education</h2>
+      <ol>
+        <li class="entity-lockup profile-entity-lockup">
+          <a href="/school/private-tutoring" data-tracking-control-name="view-education">
+            <figure><img src="https://static.licdn.com/placeholder-grey.png"
+                 data-delayed-url="https://media.licdn.com/dms/image/v2/private-tutoring/school-logo/original.jpg" alt="logo of Private tutoring" /></figure>
+            <div class="body-medium-bold list-item-heading"><span dir="ltr">Private tutoring under Mary Somerville</span></div>
+            <div class="body-small"><span dir="ltr">Mathematics, Advanced study</span></div>
+            <div class="body-small"><span class="body-small">1832 - 1840</span></div>
+          </a>
+        </li>
+      </ol>
     </section>
 
-    <section id="skills-section" class="skills-list">
-      <li><span class="skill-name">Analytical Engines</span><span class="skill-endorsement-count">99+</span></li>
-      <li><span class="skill-name">Mathematical Notation</span></li>
-      <li><span class="skill-name">Technical Writing</span></li>
-    </section>
-
-    <section id="certifications-section" class="accomplishment-type certifications-section">
-      <li class="accomplishment-entry">
-        <h3 class="entity-title">Fellow (honorary)</h3>
-        <h4 class="entity-subtitle">Royal Astronomical Society</h4>
-        <a href="https://example.org/ras-fellow">cert link</a>
-        <time class="date-range">1843</time>
-      </li>
-    </section>
-
-    <section id="languages-section" class="accomplishment-type languages-section">
-      <li class="accomplishment-entry">
-        <h3 class="entity-title">English</h3>
-        <h4 class="entity-subtitle">Native or bilingual proficiency</h4>
-      </li>
-      <li class="accomplishment-entry">
-        <h3 class="entity-title">French</h3>
-        <h4 class="entity-subtitle">Professional working proficiency</h4>
-      </li>
-    </section>
-
-    <section id="projects-section" class="accomplishment-type projects-section">
-      <li class="accomplishment-entry">
-        <h3 class="item-title">Notes on the Analytical Engine</h3>
-        <p class="entity-description">An extensive set of notes, including what is recognised as the first algorithm.</p>
-        <a href="https://example.org/notes-g">project link</a>
-        <time class="date-range">1843</time>
-      </li>
+    <section class="skills-list">
+      <h2>Skills</h2>
+      <ol class="skills-list">
+        <li class="skill-item body-small-bold text-color-text inline-block py-0.5">
+          <span dir="ltr">Analytical Engines</span>
+          <span class="dot-separator" aria-hidden="true"></span>
+        </li>
+        <li class="skill-item body-small-bold text-color-text inline-block py-0.5">
+          <span dir="ltr">Mathematical Notation</span>
+          <span class="dot-separator" aria-hidden="true"></span>
+        </li>
+        <li class="skill-item body-small-bold text-color-text inline-block py-0.5">
+          <span dir="ltr">Technical Writing</span>
+        </li>
+      </ol>
     </section>
   </main>
 </body>

@@ -27,12 +27,11 @@ test("splits location from the follower count sharing its element", () => {
 
 test("resolves the CSS-drawn dot separator instead of leaving a run-on string", () => {
   const { data } = parseFixture();
-  // The headline/subtitle text should not contain the raw run-on that a
-  // literal `.dot-separator` (empty in the DOM) would otherwise produce.
-  const exp = data.experience[0];
-  assert.ok(exp);
-  assert.match(exp.companyName ?? "", /Analytical Engine Project/);
-  assert.equal(exp.employmentType, "Full-time");
+  // The location line concatenates location text + dot-separator + a
+  // follower-count span in the same element -- if the separator weren't
+  // resolved first, the split logic would produce a run-on string.
+  assert.match(data.location.full ?? "", /London Area, United Kingdom/);
+  assert.equal(data.location.full?.includes("·"), false);
 });
 
 test("only accepts media.licdn.com as a real image, not the lazy placeholder", () => {
@@ -56,16 +55,21 @@ test("parses a current role as isCurrent with no end date", () => {
   assert.equal(current.dateRange?.start?.year, 1843);
 });
 
-test("parses education, skills, certifications, languages, and projects", () => {
+test("parses education and skills", () => {
   const { data } = parseFixture();
   assert.equal(data.education.length, 1);
   assert.equal(data.education[0]?.schoolName, "Private tutoring under Mary Somerville");
   assert.equal(data.skills.length, 3);
   assert.equal(data.skills[0]?.name, "Analytical Engines");
-  assert.equal(data.certifications.length, 1);
-  assert.equal(data.languages.length, 2);
-  assert.equal(data.languages[1]?.name, "French");
-  assert.equal(data.projects.length, 1);
+});
+
+test("certifications/languages/projects are unconfirmed selectors -- degrade to [] rather than guess", () => {
+  const { data } = parseFixture();
+  // Not present in the fixture (matching the one live capture this parser
+  // was verified against, which also had none) -- see parse.ts docstring.
+  assert.deepEqual(data.certifications, []);
+  assert.deepEqual(data.languages, []);
+  assert.deepEqual(data.projects, []);
 });
 
 test("fields absent from the fixture degrade to null/[] rather than throwing", () => {
