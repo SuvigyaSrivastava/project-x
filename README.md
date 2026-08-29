@@ -63,7 +63,7 @@ Three quirks are handled explicitly:
 | Images are lazy-loaded | the real URL is in `data-delayed-url`; `src` is a grey placeholder on `static.licdn.com` | only accept `media.licdn.com` URLs |
 | Location shares its element with follower/connection counts | `"Seattle, Washington 40,604,066 followers"` | pull the counts out by pattern, keep the remainder |
 
-**Honesty note:** the exact CSS selectors and container classes in `parse.ts` are modeled on the documented shape of `mwlite`, not yet confirmed against a page captured live from this project's own account — that verification is the next concrete step, tracked in Known Limitations. They're kept as named constants at the top of the file specifically so a correction, once verified, is a small diff there rather than a rewrite. `MOCK_MODE` proves the parsing *pipeline* against a synthetic fixture built to the same shape; it does not prove every real-world quirk is handled.
+**Honesty note:** verified 2026-08-29 against one profile captured live through this project's own throwaway account. Most of the original guesses held up (`.experience-container`, `.education-container`, `.skills-list`, `.summary-container`, `.dot-separator`, tracking attributes, lazy images); the topcard name/headline/location selectors and the experience/education item structure didn't and were corrected — see `parse.ts`'s module docstring and `git log` for exactly what changed and why. One real bug the capture caught: the page embeds the *viewer's* own nav-bar avatar before the subject's photo, so a naive "first profile-shaped image" selector would have silently returned the wrong person's photo — `avatar` is now scoped to the alt-text pattern that's unique to the subject. Certifications/languages/projects/etc. weren't present on the one profile captured, so those selectors are still unconfirmed guesses rather than invented facts. `MOCK_MODE`'s fixture was updated to match the confirmed real structure.
 
 ### Where the profile photo comes from
 
@@ -278,7 +278,7 @@ The cookie only ever comes from the environment — never logged (pino redacts `
 
 ## Known limitations
 
-- **`parse.ts`'s selectors need live verification.** They're modeled on the documented shape of `mwlite`, proven end-to-end against a synthetic fixture via `MOCK_MODE`, but not yet confirmed against a real captured page from this project's own throwaway account. That's the next concrete step before trusting this against production LinkedIn.
+- **`parse.ts`'s core selectors are verified against one live capture** (name, headline, location, followers, summary, profile photo, experience, education, skills — see git history for the fix commit). Certifications/languages/projects/volunteering/honors/etc. were absent from that one profile, so those selectors remain unconfirmed guesses, not proven facts. Verifying against a profile that actually has them is the next concrete step.
 - **Access is scoped to what the account sees.** Out-of-network profiles may come back sparse.
 - **Cookies expire and rotate; there's no automatic refresh** — logging in programmatically is exactly what trips bot detection. When the cookie dies, the API says so plainly (`LINKEDIN_ERROR`).
 - **One account, one throughput ceiling.** See "A live-observed finding" above — this isn't theoretical for this project.
