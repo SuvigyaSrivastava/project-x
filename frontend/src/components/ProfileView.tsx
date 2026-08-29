@@ -1,88 +1,197 @@
-import type { ProfileData } from "@/lib/types";
+"use client";
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+import { useState } from "react";
+import type { DateRange, ProfileData } from "@/lib/types";
+import { BriefcaseIcon, GraduationCapIcon, MapPinIcon, SparkIcon, UsersIcon } from "./icons";
+
+function initials(name: string | null): string {
+  if (!name) return "?";
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0]!.slice(0, 2).toUpperCase();
+  return (parts[0]![0]! + parts[parts.length - 1]![0]!).toUpperCase();
+}
+
+// Falls back to an initials tile if `src` is missing OR fails to load --
+// mock-mode fixture image URLs (media.licdn.com/dms/...) are synthetic and
+// 404 in a real browser, so a load-failure fallback is required, not just a
+// null check.
+function Avatar({ src, name, size = 80 }: { src: string | null; name: string | null; size?: number }) {
+  const [failed, setFailed] = useState(false);
+  if (src && !failed) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={src}
+        alt={name ?? "Profile photo"}
+        width={size}
+        height={size}
+        onError={() => setFailed(true)}
+        className="shrink-0 rounded-2xl border border-border-strong object-cover shadow-lg shadow-black/40"
+        style={{ width: size, height: size }}
+      />
+    );
+  }
   return (
-    <div className="mb-6">
-      <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-500 mb-2">{title}</h3>
-      {children}
+    <div
+      className="flex shrink-0 items-center justify-center rounded-2xl border border-border-strong bg-gradient-to-br from-accent/25 via-accent-2/20 to-transparent font-display text-2xl font-medium text-ink shadow-lg shadow-black/40"
+      style={{ width: size, height: size }}
+    >
+      {initials(name)}
     </div>
   );
 }
 
+function StatPill({ icon, children }: { icon: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-white/[0.02] px-3 py-1 text-xs text-ink-dim">
+      <span className="text-ink-faint">{icon}</span>
+      {children}
+    </span>
+  );
+}
+
+function SectionHeading({ icon, title }: { icon: React.ReactNode; title: string }) {
+  return (
+    <div className="mb-4 flex items-center gap-2">
+      <span className="flex h-6 w-6 items-center justify-center rounded-md bg-white/[0.04] text-ink-dim">{icon}</span>
+      <h3 className="text-[13px] font-medium uppercase tracking-[0.08em] text-ink-dim">{title}</h3>
+    </div>
+  );
+}
+
+function Logo({ src, alt }: { src: string | null; alt: string }) {
+  const [failed, setFailed] = useState(false);
+  if (src && !failed) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={src}
+        alt={alt}
+        onError={() => setFailed(true)}
+        className="h-10 w-10 shrink-0 rounded-lg border border-border object-cover"
+      />
+    );
+  }
+  return <div className="h-10 w-10 shrink-0 rounded-lg border border-border bg-white/[0.03]" />;
+}
+
+function formatRange(range: DateRange | null): string | null {
+  if (!range) return null;
+  return range.text || null;
+}
+
 export function ProfileView({ data }: { data: ProfileData }) {
   return (
-    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 max-w-2xl w-full">
-      <div className="flex items-center gap-4 mb-4">
-        {data.profilePicture ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={data.profilePicture.original} alt={data.fullName ?? "Profile"} className="w-16 h-16 rounded-full object-cover" />
-        ) : (
-          <div className="w-16 h-16 rounded-full bg-gray-200 flex items-center justify-center text-gray-400 text-xs">
-            No photo
+    <div className="w-full animate-fade-up overflow-hidden rounded-3xl border border-border bg-surface/60 shadow-card backdrop-blur">
+      {/* Header */}
+      <div className="relative border-b border-border p-6 sm:p-8">
+        <div className="pointer-events-none absolute inset-0 bg-grid-fade opacity-60" />
+        <div className="relative flex flex-col gap-5 sm:flex-row sm:items-start">
+          <Avatar src={data.profilePicture?.original ?? null} name={data.fullName} />
+          <div className="min-w-0 flex-1">
+            <h2 className="truncate font-display text-2xl font-medium text-ink sm:text-[1.75rem]">
+              {data.fullName ?? "Unknown profile"}
+            </h2>
+            {data.headline && <p className="mt-1 text-[15px] leading-snug text-ink-dim">{data.headline}</p>}
+            <div className="mt-3 flex flex-wrap gap-2">
+              {data.location.full && (
+                <StatPill icon={<MapPinIcon className="h-3.5 w-3.5" />}>{data.location.full}</StatPill>
+              )}
+              {data.followersCount !== null && (
+                <StatPill icon={<UsersIcon className="h-3.5 w-3.5" />}>
+                  {data.followersCount.toLocaleString()} followers
+                </StatPill>
+              )}
+            </div>
           </div>
-        )}
-        <div>
-          <h2 className="text-xl font-bold">{data.fullName ?? "Unknown"}</h2>
-          {data.headline && <p className="text-gray-600 text-sm">{data.headline}</p>}
-          {data.location.full && <p className="text-gray-400 text-xs mt-0.5">{data.location.full}</p>}
         </div>
       </div>
 
-      {data.followersCount !== null && (
-        <p className="text-xs text-gray-500 mb-4">{data.followersCount.toLocaleString()} followers</p>
-      )}
+      <div className="space-y-8 p-6 sm:p-8">
+        {data.summary && (
+          <section>
+            <SectionHeading icon={<SparkIcon className="h-3.5 w-3.5" />} title="About" />
+            <p className="whitespace-pre-line text-[14.5px] leading-relaxed text-ink-dim">{data.summary}</p>
+          </section>
+        )}
 
-      {data.summary && (
-        <Section title="About">
-          <p className="text-sm text-gray-700 whitespace-pre-line">{data.summary}</p>
-        </Section>
-      )}
+        {data.experience.length > 0 && (
+          <section>
+            <SectionHeading icon={<BriefcaseIcon className="h-3.5 w-3.5" />} title="Experience" />
+            <ul className="space-y-4">
+              {data.experience.map((exp, i) => (
+                <li key={i} className="flex gap-3.5">
+                  <Logo src={exp.companyLogo?.original ?? null} alt={exp.companyName ?? "Company logo"} />
+                  <div className="min-w-0 flex-1 border-b border-border/70 pb-4 last:border-0 last:pb-0">
+                    <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+                      <p className="text-[14.5px] font-medium text-ink">{exp.title ?? "—"}</p>
+                      {formatRange(exp.dateRange) && (
+                        <p className="shrink-0 text-xs text-ink-faint">{formatRange(exp.dateRange)}</p>
+                      )}
+                    </div>
+                    <p className="mt-0.5 text-[13.5px] text-ink-dim">
+                      {exp.companyName}
+                      {exp.employmentType ? ` · ${exp.employmentType}` : ""}
+                    </p>
+                    {exp.description && (
+                      <p className="mt-2 whitespace-pre-line text-[13.5px] leading-relaxed text-ink-faint">
+                        {exp.description}
+                      </p>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
 
-      {data.experience.length > 0 && (
-        <Section title="Experience">
-          <ul className="space-y-3">
-            {data.experience.map((exp, i) => (
-              <li key={i} className="text-sm">
-                <p className="font-medium">{exp.title ?? "—"}</p>
-                <p className="text-gray-600">
-                  {exp.companyName}
-                  {exp.employmentType ? ` · ${exp.employmentType}` : ""}
-                </p>
-                {exp.dateRange && <p className="text-gray-400 text-xs">{exp.dateRange.text}</p>}
-              </li>
-            ))}
-          </ul>
-        </Section>
-      )}
+        {data.education.length > 0 && (
+          <section>
+            <SectionHeading icon={<GraduationCapIcon className="h-3.5 w-3.5" />} title="Education" />
+            <ul className="space-y-4">
+              {data.education.map((edu, i) => (
+                <li key={i} className="flex gap-3.5">
+                  <Logo src={edu.schoolLogo?.original ?? null} alt={edu.schoolName ?? "School logo"} />
+                  <div className="min-w-0 flex-1 border-b border-border/70 pb-4 last:border-0 last:pb-0">
+                    <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+                      <p className="text-[14.5px] font-medium text-ink">{edu.schoolName ?? "—"}</p>
+                      {formatRange(edu.dateRange) && (
+                        <p className="shrink-0 text-xs text-ink-faint">{formatRange(edu.dateRange)}</p>
+                      )}
+                    </div>
+                    {(edu.degreeName || edu.fieldOfStudy) && (
+                      <p className="mt-0.5 text-[13.5px] text-ink-dim">
+                        {edu.degreeName}
+                        {edu.fieldOfStudy ? ` · ${edu.fieldOfStudy}` : ""}
+                      </p>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
 
-      {data.education.length > 0 && (
-        <Section title="Education">
-          <ul className="space-y-3">
-            {data.education.map((edu, i) => (
-              <li key={i} className="text-sm">
-                <p className="font-medium">{edu.schoolName ?? "—"}</p>
-                <p className="text-gray-600">
-                  {edu.degreeName}
-                  {edu.fieldOfStudy ? ` · ${edu.fieldOfStudy}` : ""}
-                </p>
-                {edu.dateRange && <p className="text-gray-400 text-xs">{edu.dateRange.text}</p>}
-              </li>
-            ))}
-          </ul>
-        </Section>
-      )}
-
-      {data.skills.length > 0 && (
-        <Section title="Skills">
-          <div className="flex flex-wrap gap-2">
-            {data.skills.map((s, i) => (
-              <span key={i} className="text-xs bg-gray-100 rounded-full px-3 py-1 text-gray-700">
-                {s.name}
-              </span>
-            ))}
-          </div>
-        </Section>
-      )}
+        {data.skills.length > 0 && (
+          <section>
+            <SectionHeading icon={<SparkIcon className="h-3.5 w-3.5" />} title="Skills" />
+            <div className="flex flex-wrap gap-2">
+              {data.skills.map((s, i) => (
+                <span
+                  key={i}
+                  className="rounded-full border border-border bg-white/[0.03] px-3 py-1.5 text-[13px] text-ink-dim transition-colors hover:border-border-strong hover:text-ink"
+                >
+                  {s.name}
+                  {s.endorsementCount !== null && (
+                    <span className="ml-1.5 text-ink-faint">· {s.endorsementCount}</span>
+                  )}
+                </span>
+              ))}
+            </div>
+          </section>
+        )}
+      </div>
     </div>
   );
 }
