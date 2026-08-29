@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import type { DateRange, ProfileData } from "@/lib/types";
-import { BriefcaseIcon, GraduationCapIcon, MapPinIcon, SparkIcon, UsersIcon } from "./icons";
+import { AlertIcon, BriefcaseIcon, GraduationCapIcon, MapPinIcon, SparkIcon, UsersIcon } from "./icons";
 
 function initials(name: string | null): string {
   if (!name) return "?";
@@ -81,7 +81,8 @@ function formatRange(range: DateRange | null): string | null {
   return range.text || null;
 }
 
-export function ProfileView({ data }: { data: ProfileData }) {
+export function ProfileView({ data, warnings = [] }: { data: ProfileData; warnings?: string[] }) {
+  const hasWarnings = warnings.length > 0;
   return (
     <div className="w-full animate-fade-up overflow-hidden rounded-3xl border border-border bg-surface/60 shadow-card backdrop-blur">
       {/* Header */}
@@ -90,9 +91,20 @@ export function ProfileView({ data }: { data: ProfileData }) {
         <div className="relative flex flex-col gap-5 sm:flex-row sm:items-start">
           <Avatar src={data.profilePicture?.original ?? null} name={data.fullName} />
           <div className="min-w-0 flex-1">
-            <h2 className="truncate font-display text-2xl font-medium text-ink sm:text-[1.75rem]">
-              {data.fullName ?? "Unknown profile"}
-            </h2>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+              <h2 className="truncate font-display text-2xl font-medium text-ink sm:text-[1.75rem]">
+                {data.fullName ?? "Unknown profile"}
+              </h2>
+              {hasWarnings && (
+                <span
+                  title={warnings.join(" ")}
+                  className="inline-flex shrink-0 cursor-help items-center gap-1.5 rounded-full border border-amber-500/25 bg-amber-500/[0.08] px-2.5 py-1 text-[11px] font-medium text-amber-300"
+                >
+                  <AlertIcon className="h-3 w-3" />
+                  Unverified
+                </span>
+              )}
+            </div>
             {data.headline && <p className="mt-1 text-[15px] leading-snug text-ink-dim">{data.headline}</p>}
             <div className="mt-3 flex flex-wrap gap-2">
               {data.location.full && (
@@ -107,6 +119,16 @@ export function ProfileView({ data }: { data: ProfileData }) {
           </div>
         </div>
       </div>
+
+      {hasWarnings && (
+        <div className="flex items-start gap-2.5 border-b border-amber-500/15 bg-amber-500/[0.04] px-6 py-3 sm:px-8">
+          <AlertIcon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-400" />
+          <p className="text-[12.5px] leading-relaxed text-amber-200/80">
+            {warnings[0]}
+            {warnings.length > 1 && ` (+${warnings.length - 1} more — see raw JSON)`}
+          </p>
+        </div>
+      )}
 
       <div className="space-y-8 p-6 sm:p-8">
         {data.summary && (

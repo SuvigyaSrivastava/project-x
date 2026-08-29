@@ -160,7 +160,7 @@ export default function Home() {
 
           {result && (
             <div className="flex flex-col items-center gap-4">
-              <ProfileView data={result.data} />
+              <ProfileView data={result.data} warnings={result.warnings} />
 
               {/* Meta bar */}
               <div className="flex w-full flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-surface/40 px-4 py-3">
