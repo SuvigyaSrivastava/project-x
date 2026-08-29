@@ -1,137 +1,292 @@
 # LinkedIn Profile API
 
-`GET /v1/profile?url=<linkedin-profile-url>` → structured JSON. Python 3.11, FastAPI, httpx, run as one long-lived async process rather than on a scale-to-zero function.
+Give it a LinkedIn profile URL, get structured JSON back.
 
-This is a deliberate iteration on a specific baseline (see [Improvements over the baseline](#improvements-over-the-baseline)), not a from-scratch design — most of the choices below exist because something in that baseline had a sharp edge worth filing off.
+```
+GET /api/profile?url=https://www.linkedin.com/in/williamhgates
+```
 
-## Why a long-running process, not Lambda
+```json
+{
+  "success": true,
+  "meta": { "source": "linkedin", "cached": false, "fetchedAt": "…", "durationMs": 2186 },
+  "data": {
+    "fullName": "Bill Gates",
+    "headline": "Co-chair, Gates Foundation",
+    "location": { "full": "Seattle, Washington, United States", "country": "United States" },
+    "followersCount": 40604081,
+    "summary": "…",
+    "profilePicture": { "original": "https://media.licdn.com/…", "sizes": [ … ] },
+    "experience": [ … ], "education": [ … ], "skills": [ … ],
+    "certifications": [ … ], "languages": [ … ]
+  }
+}
+```
 
-The single biggest latency cost in a per-request Lambda isn't the LinkedIn call, it's everything that has to be rebuilt before it: a fresh TLS handshake, a fresh connection, a cold cache, a rate limiter and circuit breaker that remember nothing about the last request. A process that stays up keeps all four warm across requests:
+`backend/` — the API. Node.js 20+, TypeScript, Express.
+`frontend/` — a small Next.js + Tailwind page to try it in a browser.
 
-- One `httpx.AsyncClient` with HTTP/2 and keep-alive, created once at startup (`app/main.py`'s lifespan handler) and reused for the life of the process.
-- One in-memory cache that actually accumulates hits instead of starting empty on every cold start.
-- One circuit breaker and rate limiter with real, continuous state.
+This is a second iteration on the same brief (see [`git log`] for the first one, a Python/FastAPI service built around LinkedIn's classic Voyager REST API). That approach worked for its one endpoint that's still alive, but its five optional per-section endpoints (positions, educations, skills, certifications, languages) were confirmed dead — a consistent `302` self-redirect against a live, authenticated session, tested twice in isolation. This version starts over around a different transport that doesn't have that gap: LinkedIn's `mwlite` mobile site.
 
-The cost is the one this design accepts on purpose: a small instance has to stay running (`min_machines_running = 1` in `fly.toml`; Render's free tier is explicitly *not* used in `render.yaml`, because it sleeps after 15 minutes idle and throws all of the above away).
+## Why mwlite
+
+Ask `linkedin.com/in/<slug>` for a page and what comes back depends on how you present yourself:
+
+| You look like | What LinkedIn sends | Useful? |
+|---|---|---|
+| a logged-out visitor | a teaser page + Open Graph tags | the profile photo, nothing else |
+| a desktop browser | a large React-Server-Components-style stream, server-rendered inline | data is there, but as UI-tree fragments, not a data model |
+| a phone browser | `mwlite`: the whole profile as plain, semantic HTML | yes |
+
+The desktop finding lines up with what the previous iteration found from the browser side: LinkedIn's modern desktop profile page ships its data embedded in the initial HTML via a proprietary streaming payload, not via a separate REST or GraphQL call a script could call directly. `mwlite` is a different, older rendering path built for slow connections — the server does all the work and ships finished HTML: name, headline, location, about, experience, education, skills, certifications, languages, projects, logos, one request, no JavaScript required to read it.
+
+So the client sends a phone user-agent and reads the HTML that comes back. See `backend/src/linkedin/client.ts`.
+
+### The two things that make it work
+
+1. **The whole cookie header.** `li_at` alone isn't enough — LinkedIn also checks its routing and device cookies (`lidc`, `bcookie`, `bscookie`). Miss them and a request is more likely to be treated as a replayed cookie. A real browser sends a few dozen cookies; this client forwards the same set it was given.
+2. **A cookie jar.** LinkedIn can respond to a request with a redirect that also carries a *replacement* `li_at` via `Set-Cookie`, expecting the retry to use it. A client that keeps resending the original loops on that redirect forever. `client.ts` stores whatever LinkedIn hands back and retries with it (bounded to 4 hops, so a genuine dead session still fails cleanly instead of looping).
+
+### Reading the HTML without it being fragile
+
+`backend/src/linkedin/parse.ts` leans on the things that don't change as often as CSS:
+
+- LinkedIn's own tracking attributes (`data-tracking-control-name="profile-position"`) mark meaning, not styling.
+- Semantic container classes (`.experience-container`, `.skills-list`, …) over anything that looks like a generated utility class.
+- Shape, not position — inside an entry, "which line looks like a date" (contains a year or "Present") rather than assuming a fixed line order.
+
+Three quirks are handled explicitly:
+
+| Quirk | What you'd see | What's done about it |
+|---|---|---|
+| Separators are drawn in CSS | `<span class="dot-separator">` is empty text, so "Master of Science · Computer Science" would arrive as one run-on string | replace those spans with a literal `·` up front, then split on it |
+| Images are lazy-loaded | the real URL is in `data-delayed-url`; `src` is a grey placeholder on `static.licdn.com` | only accept `media.licdn.com` URLs |
+| Location shares its element with follower/connection counts | `"Seattle, Washington 40,604,066 followers"` | pull the counts out by pattern, keep the remainder |
+
+**Honesty note:** the exact CSS selectors and container classes in `parse.ts` are modeled on the documented shape of `mwlite`, not yet confirmed against a page captured live from this project's own account — that verification is the next concrete step, tracked in Known Limitations. They're kept as named constants at the top of the file specifically so a correction, once verified, is a small diff there rather than a rewrite. `MOCK_MODE` proves the parsing *pipeline* against a synthetic fixture built to the same shape; it does not prove every real-world quirk is handled.
+
+### Where the profile photo comes from
+
+`mwlite` doesn't reliably ship a member's avatar inline. When the mwlite parse comes back with no photo, a second, unauthenticated request goes to the logged-out public page and reads its `og:image` tag. That request needs no cookie, can't accidentally pick up the viewer's own avatar, and is allowed to fail without failing the whole lookup — see `fetchPublicOgImage` in `client.ts`.
 
 ## What this does NOT do
 
-No CAPTCHA bypass. No TLS fingerprint impersonation. No proxy rotation to dodge IP-based blocking. No device or timing fingerprint spoofing. `app/linkedin/client.py` sends the same standard headers any authenticated API client sends — that's normal HTTP behaviour, not an evasion technique — and stops there. If LinkedIn redirects to a checkpoint, the client surfaces `AuthExpiredError` and stops; it does not try to get past it.
-
-This isn't a compliance afterthought bolted on at the end — it's the actual boundary the rest of the design works inside. Every "make this faster / more resilient" decision below is about being a well-behaved, well-engineered client of someone else's API: pacing calls, not repeating failed ones into a dead session, verifying you got the right data back. None of that requires — or benefits from — pretending to be something you're not.
+No CAPTCHA bypass. No TLS fingerprint impersonation. No proxy rotation. No login automation. A phone user-agent asking for the mobile version of a public page is normal client behavior — the same category as a responsive site serving different markup to different devices — not an evasion technique, and the client stops there. If LinkedIn redirects to a login or checkpoint wall, it's surfaced as a clear error; nothing tries to solve it.
 
 ## Architecture
 
 ```
 caller
-  │  GET /v1/profile?url=...  (+ optional X-API-Key)
+  │  GET /api/profile?url=...  (+ optional x-api-key)
   ▼
-FastAPI route  ── per-IP token-bucket limiter, API key check
+Express route  ── per-IP token-bucket limiter (express-rate-limit), API key check
   │
   ▼
-StaleWhileRevalidateCache ── single-flight per key
-  │  hit (fresh)        → return immediately
-  │  hit (stale)        → return immediately, refresh in background
-  │  miss                → block on:
+TtlCache (stale-while-revalidate, single-flight per key)
+  │  hit (fresh)  → return immediately
+  │  hit (stale)  → return immediately, refresh in background
+  │  miss         → block on:
   ▼
 ProfileService
   │
-  ├─▶ LinkedInClient.fetch_identity()        ── 1 call, always
-  │     (rate-limited, circuit-breaker-gated, HTTP/2 keep-alive)
+  ├─▶ CircuitBreaker.beforeCall()      ── stop calling LinkedIn after N
+  │                                        consecutive auth-shaped failures
+  ├─▶ TokenBucket.acquire()            ── pace outbound calls; see
+  │                                        "A live-observed finding" below
+  ├─▶ LinkedInClient.fetchProfileHtml() ── mwlite fetch, full cookie header,
+  │                                         cookie jar, bounded redirect retry
+  └─▶ parseMwliteHtml()                ── HTML -> our schema, cheerio
   │
-  └─▶ asyncio.gather(                        ── up to 5 calls, concurrent,
-        fetch_section("positions"),             bounded by a semaphore
-        fetch_section("educations"),
-        fetch_section("skills"),
-        fetch_section("certifications"),
-        fetch_section("languages"),
-      )
-        each section fails independently -- a 502 from one doesn't
-        fail the request, it adds one line to `warnings`
-  │
-  ▼
-profile_mapper (pure functions)
-  │  resolve_identity(): verify the returned profile IS the one requested
-  │  extract_*(): verify each nested record is OWNED by that same profile
   ▼
 ProfileResponse + warnings[] + cached:bool
 ```
 
-## Improvements over the baseline
+## A live-observed finding this design is built around
 
-The baseline this iterates on (Lambda + API Gateway, `identity/dash/profiles` with a `profileView` compatibility fallback) already did real identity verification and kept credentials out of logs — that's exactly why it was worth building on rather than starting over. What changed and why:
+While validating the previous (Python/Voyager) iteration against a real account, calls landing back-to-back with no spacing — even to an endpoint that worked cleanly on its own — repeatedly triggered a server-side session kill (silent logout, auto-relogin, no CAPTCHA). It happened three separate times, always right after a prior call, never in isolation. That's not a Voyager-specific quirk; it's evidence about how this account's session is monitored, and it applies here too. `LINKEDIN_MIN_INTERVAL_MS` (default 1200ms) and `LINKEDIN_BURST` (default 2) exist specifically because of that, not as generic good manners — treat lowering them as something to re-verify live, not just a config tweak.
 
-| Area | Baseline | Here | Why |
-|---|---|---|---|
-| Runtime | Lambda, cold start per fresh instance | One long-lived process | Connection pool, cache, breaker all survive across requests — see above |
-| Section fetches | Sequential, small per-request call budget | Concurrent (`asyncio.gather` + semaphore) | p99 tracks the slowest single section, not the sum of all of them |
-| Cache | TTL only | Stale-while-revalidate + single-flight | A caller never blocks on a cold cache someone else is already refreshing; an expired-but-recent entry is served instantly while a background task refreshes it |
-| Auth failure handling | Fails each call independently | Circuit breaker trips after N consecutive auth-shaped failures | Stops hammering a session that's already dead instead of burning the rate budget finding that out five more times |
-| Identity verification | Top-level `publicIdentifier` match | Top-level match **+** per-record ownership check on every experience/education/skill/cert/language entry | A schema change that starts leaking a *different* member's nested records into the response is caught, not just a top-level identity swap |
-| Cookie handling | `li_at` + `JSESSIONID` | Full cookie header, parsed and validated; missing `bcookie`/`bscookie`/`lidc` logs a specific warning naming what's missing | Every serious writeup of this problem converges on the same finding: a partial cookie set is what gets a session killed in the first few requests |
-| Errors | Typed exceptions → status codes | Same, plus a normalized envelope (`{"error": {code, message, request_id}}`) enforced by one exception handler so a raw `HTTPException(detail=...)` can't leak an inconsistent shape | Consistency is part of the contract, not just the happy path |
-| Rate limiting | Fixed AWS API Gateway throttle | Non-blocking per-IP token bucket for callers; separate token bucket pacing outbound LinkedIn calls | Two different things being paced for two different reasons shouldn't share one knob |
-| Observability | — | Structured JSON logs, one request ID threaded from the edge middleware through every downstream log line | A production incident starts with "grep this request ID," not "guess which log line was this request" |
+## Quick start
 
-## Setup
+Requirements: Node.js 20+.
+
+### Backend
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements-dev.txt
-cp .env.example .env   # fill in LINKEDIN_COOKIE -- see below
-pytest                 # 39 tests, all fixture-driven, no network or credentials needed
-uvicorn app.main:app --reload
+cd backend
+npm install
+cp .env.example .env
+npm run dev
 ```
 
-`/docs` has interactive OpenAPI docs once it's running.
+`.env.example` ships with `MOCK_MODE=true`, so it runs immediately with no LinkedIn account — it serves a bundled synthetic profile through the exact same parsing pipeline.
 
-## Getting a LinkedIn session (do this on a throwaway account)
+```bash
+curl "http://localhost:4000/api/profile?url=https://www.linkedin.com/in/ada-lovelace"
+```
 
-Every submission that got this far in the wild made the same call: use a secondary account, not your own. This isn't paranoia — it's the same reasoning that makes you not run untrusted code as root. If you don't have one set up yet:
+For real profiles, put your cookie in `.env` (see below) and set `MOCK_MODE=false`.
 
-1. **Create a new LinkedIn account** with a fresh email address you control. Don't reuse your real name or existing photos if you'd rather keep it clearly separate from your identity.
-2. **Fill in a minimal profile** — a headline and one line of "about" is enough. A completely empty account is itself a signal LinkedIn's own systems weight; a few minutes of normal-looking setup goes a long way.
-3. **Use it like a person would, briefly, before wiring it into anything** — view a few profiles, accept a connection or two, browse the feed. Then let it sit for a day or two before pointing an API at it. Immediately scripting a brand-new account is the pattern that gets flagged fastest, and there's no evasion trick that substitutes for just not doing that.
-4. **Log in from the same browser/network you'll capture the cookie from.** Consistency between where the cookie was minted and where it's used matters more than anything about the request headers.
-5. **Capture the full cookie, not just `li_at`:**
-   - DevTools (F12) → Network tab → reload any profile page.
-   - Click the request to `www.linkedin.com` → Headers → Request Headers.
-   - Right-click the `cookie:` line → Copy value.
-   - Paste the whole thing into `.env` as `LINKEDIN_COOKIE`, single-quoted (it contains `"` and `;`).
-6. **Keep request volume low and expect to refresh this periodically.** `li_at` isn't permanent, and this service does not attempt to re-authenticate itself — when it dies, `/health` still reports `credentials_configured: true` (the cookie parsed fine at startup) but calls will start returning `502 AUTH_EXPIRED`, and that's the cue to repeat steps 5–6.
+### Frontend
 
-Never commit `.env`. `.gitignore` already excludes it, plus `capture*.txt` and `*.har` — a copied cURL command or a HAR export carries the same cookie.
+```bash
+cd frontend
+npm install
+cp .env.example .env.local
+npm run dev
+```
 
-## API
+Open `http://localhost:3000`, paste a profile URL. The page calls the backend directly — there's no server-side hop, so the backend's per-IP rate limit applies per visitor, not per frontend deployment.
 
-`GET /v1/profile?url=<url-or-bare-identifier>&refresh=<bool>` — `refresh=true` bypasses the cache read but still writes the fresh result back for the next caller.
+## Getting your LinkedIn cookie
+
+The backend authenticates as you, using cookies from a browser where you're already signed in. No password is typed or stored by this code.
+
+1. Sign in to `linkedin.com` in Chrome, **on a throwaway account** — not your main one. Scraping with your own session violates LinkedIn's User Agreement regardless of the data's public status, and the realistic consequence of getting caught is a restricted account.
+2. Open any profile. DevTools (F12) → Network → filter to Doc → hard-reload.
+3. Click the one row named after the profile → Headers → Request Headers → right-click `cookie:` → Copy value.
+4. Paste into `backend/.env`:
+   ```
+   LINKEDIN_COOKIE='li_at=AQED...; JSESSIONID="ajax:..."; bcookie="v=2&..."; bscookie="v=1&..."; lidc="b=..."'
+   MOCK_MODE=false
+   ```
+
+Treat this like a password — anyone holding it is logged in as you. `.env`, `capture*.txt`, and `*.har` are all git-ignored. Cookies expire and rotate; when that happens the API returns a clear `LINKEDIN_ERROR` rather than failing silently or trying to log back in on its own.
+
+## Environment variables
+
+| Variable | Default | What it does |
+|---|---|---|
+| `LINKEDIN_COOKIE` | — | Full cookie header. Required unless `MOCK_MODE=true`. |
+| `LINKEDIN_LI_AT` / `LINKEDIN_JSESSIONID` | — | Older two-cookie fallback. Usually not sufficient alone. |
+| `MOCK_MODE` | `false` | Serve the bundled synthetic profile instead of calling LinkedIn. |
+| `PORT` | `4000` | Port to listen on. |
+| `API_KEY` | (empty) | If set, callers must send it as `x-api-key`. Empty = open API. |
+| `CORS_ORIGINS` | `*` | Comma-separated allowed browser origins. |
+| `CACHE_TTL_SECONDS` / `CACHE_STALE_SECONDS` | `900` / `3600` | Fresh / stale-but-servable cache lifetimes. |
+| `RATE_LIMIT_WINDOW_MS` / `RATE_LIMIT_MAX` | `60000` / `20` | This API's own per-IP limit. |
+| `LINKEDIN_MIN_INTERVAL_MS` / `LINKEDIN_BURST` | `1200` / `2` | Outbound pacing to LinkedIn — see "A live-observed finding" above. |
+| `CIRCUIT_BREAKER_FAILURE_THRESHOLD` / `_RESET_SECONDS` | `3` / `30` | Stop calling LinkedIn after N consecutive auth-shaped failures. |
+| `REQUEST_TIMEOUT_MS` | `10000` | Per-call timeout. |
+| `LOG_LEVEL` | `info` | pino log level. |
+
+Invalid configuration fails at startup (zod-validated), not at the first request.
+
+## API documentation
+
+Authentication: if `API_KEY` is set, send it as `x-api-key: <key>` or `Authorization: Bearer <key>`. Otherwise no auth needed. Compared in constant time.
+
+### `GET /api/health`
+
+Never requires an API key.
 
 ```json
-{
-  "data": { "public_identifier": "jane-doe", "first_name": "Jane", "...": "..." },
-  "warnings": [],
-  "cached": false
-}
+{ "success": true, "status": "ok", "uptimeSeconds": 42, "mode": "live", "linkedInCredentialsConfigured": true, "version": "2.0.0" }
 ```
 
-Errors are always `{"error": {"code", "message", "request_id"}}`:
+### `GET /api/profile` / `POST /api/profile`
 
-| Status | code | Cause |
+| Param | Type | Default | Description |
+|---|---|---|---|
+| `url` | string | required | A LinkedIn profile URL, or a bare slug. Max 500 chars. |
+| `refresh` | true/false | false | Skip the cache read; still writes the fresh result back. |
+
+Accepted URL shapes: full `/in/<slug>` URLs on any subdomain, with any query string, with a trailing sub-path (`/details/experience/`), percent-encoded names, or a bare slug.
+
+```bash
+curl -G http://localhost:4000/api/profile --data-urlencode "url=https://www.linkedin.com/in/williamhgates"
+```
+
+### Errors
+
+Every failure uses the same envelope: `{ "success": false, "error": { "code", "message", "requestId" } }`.
+
+| HTTP | code | Cause |
 |---|---|---|
-| 400 | `INVALID_URL` | Not a parseable `linkedin.com/in/...` URL |
-| 401 | `UNAUTHORIZED` | `API_KEY` is set and missing/wrong |
-| 403 | `PROFILE_PRIVATE` | Profile not visible to this session |
-| 404 | `PROFILE_NOT_FOUND` | No such profile |
-| 429 | `UPSTREAM_RATE_LIMITED` / `RATE_LIMITED` | LinkedIn throttled us / you hit the per-IP limit |
-| 502 | `AUTH_EXPIRED` | Session cookie stale, rejected, or checkpointed — refresh it, see above |
-| 502 | `UPSTREAM_SCHEMA_CHANGED` | LinkedIn's shape drifted, or an identity/ownership check rejected the data — see `app/mapper/profile_mapper.py` |
-| 503 | `NOT_CONFIGURED` | No `LINKEDIN_COOKIE` set |
-| 504 | `UPSTREAM_TIMEOUT` | LinkedIn didn't respond within `REQUEST_TIMEOUT_SECONDS` |
+| 400 | `BAD_REQUEST` | Missing, malformed, or not a `/in/` profile URL. |
+| 401 | `UNAUTHORIZED` | `API_KEY` set and missing/wrong. |
+| 404 | `PROFILE_NOT_FOUND` | No such profile, or not visible to the logged-in account. |
+| 404 | `ROUTE_NOT_FOUND` | No such endpoint. |
+| 429 | `RATE_LIMITED` | You hit this API's per-IP limit. |
+| 429 | `LINKEDIN_RATE_LIMITED` | LinkedIn is throttling this account. |
+| 502 | `LINKEDIN_ERROR` | Cookie stale/incomplete, login wall, redirect loop, or a security challenge. |
+| 503 | `NOT_CONFIGURED` | No cookie set and `MOCK_MODE` is off. |
+| 503 | `UPSTREAM_UNAVAILABLE` | Circuit breaker open after repeated auth-shaped failures. |
+| 504 | `UPSTREAM_TIMEOUT` | LinkedIn didn't respond within `REQUEST_TIMEOUT_MS`. |
+
+## Response schema
+
+Rules followed throughout: a missing single value is `null`, never `undefined`/`""`. A missing list is `[]`. Dates are structured *and* pre-formatted (`{ month, year, text }`) so a caller can compute or just print without writing a formatter. Images come as a set of sizes plus `original`.
+
+Two honesty notes:
+
+- `dateRange.text` reuses LinkedIn's own wording for a duration rather than recomputing it, so this API never disagrees with what the site says.
+- `profileId` is always `null`. `mwlite` does embed a member URN, but it's the *viewer's*, byte-identical across different people's profiles — a confident wrong id is worse than an honest empty one.
+
+Full type definitions: `backend/src/types/profile.ts`.
+
+## Project layout
+
+```
+backend/
+  fixtures/profile.html        synthetic mwlite page (powers MOCK_MODE + tests)
+  src/
+    index.ts                   bootstrap, graceful shutdown
+    app.ts                     express app: helmet, cors, rate limit, routes
+    config/env.ts               zod-validated environment, fails fast
+    routes/{health,profile}.ts
+    middleware/{auth,errorHandler}.ts
+    linkedin/
+      url.ts                    profile URL -> public identifier
+      client.ts                 mwlite fetch: full cookie header + cookie jar
+      parse.ts                  mwlite HTML -> our schema
+      service.ts                orchestration: breaker -> pacing -> cache -> fetch -> parse
+    utils/                      circuitBreaker, tokenBucket, ttlCache, logger, apiError
+    types/profile.ts            the public response schema
+    __tests__/                  28 tests: url parsing, HTML parsing, HTTP API
+
+frontend/
+  src/app/page.tsx              the search page
+  src/components/ProfileView.tsx
+  src/lib/types.ts               a copy of the response schema
+```
+
+## Deploying
+
+**Backend on Render** — `render.yaml` at the repo root is a ready blueprint (`dockerContext: ./backend`). `LINKEDIN_COOKIE`/`API_KEY` are `sync: false`, so they live in Render's dashboard, never in git. Health check: `GET /api/health`.
+
+**Anywhere else** — `backend/Dockerfile` is multi-stage, non-root, production dependencies only:
+```bash
+cd backend
+docker build -t linkedin-profile-api .
+docker run -p 4000:4000 --env-file .env linkedin-profile-api
+```
+
+**Frontend on Vercel** — Root Directory `frontend`, one env var: `NEXT_PUBLIC_API_BASE_URL=https://your-api.example.com`. Then set the backend's `CORS_ORIGINS` to the Vercel domain.
+
+## Testing
+
+```bash
+cd backend
+npm test        # 28 tests: URL parsing, HTML parsing, HTTP API -- offline, no credentials
+npm run typecheck
+npm run build    # tsc compiles cleanly
+```
+
+## Security notes
+
+The cookie only ever comes from the environment — never logged (pino redacts `cookie` and `x-api-key`), never returned in a response, never written to disk by this code. Input is validated before use: only `linkedin.com` hosts and `/in/` paths are accepted, the slug is rejected if it decodes to path-traversal syntax, and re-encoded before reaching LinkedIn. API keys compare in constant time. `capture*.txt`/`*.har` are git-ignored, since a copied cURL command or HAR export carries the whole cookie header.
 
 ## Known limitations
 
-- **Single instance.** The cache, rate limiter, and circuit breaker are all process-local by design (`Dockerfile` runs `--workers 1` on purpose). Running more than one instance means each has its own view of the world — the fix, when you actually need horizontal scale, is swapping `app/cache/cache.py`'s store for Redis; the `get_or_fetch`/`put` interface was kept narrow specifically so that's a one-file change.
-- **Identity endpoint verified live; two of five section endpoints confirmed dead.** `IDENTITY_PATH` and `IDENTITY_DECORATION_ID` were confirmed 2026-08-27 against a real authenticated session -- a direct call returned `200` with the expected `{data, included}` envelope and resolved the correct member URN, with no side effects on the session. `profilePositions` and `profileEducations` were each live-probed in isolation and both came back `302` redirecting to themselves -- a retired/moved-endpoint response, not a session-kill (the accompanying `Clear-Site-Data` header only affects a real browser processing the response, and the browser session was unaffected both times). `profileSkills`, `profileCertifications`, and `profileLanguages` weren't individually probed, but 2/2 identical results in the same resource family makes it likely they're the same. `FETCH_OPTIONAL_SECTIONS` now defaults to `false` as a direct consequence -- see `app/linkedin/endpoints.py` for the full finding and re-enable per-section once a verified-working path exists for whichever section you need.
-- **No automatic re-authentication.** By design — scripted login is exactly the pattern that trips 2FA/checkpoints. When the session dies, an operator refreshes it manually.
-- **Section coverage depends on what the identity call's own decoration already includes** versus what the 5 optional per-section calls add; `FETCH_OPTIONAL_SECTIONS=false` trades completeness for fewer LinkedIn calls and a faster p50.
-- **This uses a private, undocumented API and LinkedIn's terms restrict automated access to it.** Scoped for evaluation on a throwaway account, kept low-volume, not intended as a long-running public product without an explicit decision to accept that risk.
+- **`parse.ts`'s selectors need live verification.** They're modeled on the documented shape of `mwlite`, proven end-to-end against a synthetic fixture via `MOCK_MODE`, but not yet confirmed against a real captured page from this project's own throwaway account. That's the next concrete step before trusting this against production LinkedIn.
+- **Access is scoped to what the account sees.** Out-of-network profiles may come back sparse.
+- **Cookies expire and rotate; there's no automatic refresh** — logging in programmatically is exactly what trips bot detection. When the cookie dies, the API says so plainly (`LINKEDIN_ERROR`).
+- **One account, one throughput ceiling.** See "A live-observed finding" above — this isn't theoretical for this project.
+- **`industry`, `countryCode`, `isPremium`, skill `endorsementCount` are always `null`** — not on the `mwlite` page.
+- **Contact info is not fetched** — it's the most sensitive part of a profile and isn't required by the brief.
+- **The cache, rate limiter, and circuit breaker are process-local**, same trade-off as the previous iteration. Horizontal scale means moving them to a shared store (Redis) — `TtlCache`'s interface was kept narrow for that reason.
+- **`MOCK_MODE` data is synthetic** — it proves the pipeline, not that every real-world markup quirk is handled.
+
+## Legal and ethical note
+
+Scraping LinkedIn with your own session violates LinkedIn's User Agreement regardless of the data's public status under law — the realistic consequence is a restricted or banned account, hence the throwaway-account guidance above. Profile data is also personal data; in the EU/UK, GDPR applies whether or not it was public. For anything beyond evaluation, the honest answer is LinkedIn's official partner APIs or a licensed vendor — this project exists to show the mechanism is understood, not as a production scraping service.

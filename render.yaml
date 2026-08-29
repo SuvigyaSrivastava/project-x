@@ -2,17 +2,21 @@ services:
   - type: web
     name: linkedin-profile-api
     env: docker
-    dockerfilePath: ./Dockerfile
-    plan: starter  # NOT the free plan -- free instances sleep after 15
-                    # minutes idle, which throws away the warm connection
-                    # pool and cache this design depends on for speed.
-    healthCheckPath: /health
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: free  # see README "Known limitations" -- free tier sleeps after
+                # 15 min idle; the first request after a quiet spell takes
+                # ~50s while the instance wakes. Upgrade to a paid plan to
+                # avoid this, same trade-off tross-v1 (Python) documented.
+    healthCheckPath: /api/health
     envVars:
       - key: LINKEDIN_COOKIE
         sync: false
       - key: API_KEY
         sync: false
       - key: LOG_LEVEL
-        value: INFO
-      - key: RATE_LIMIT_PER_MINUTE
+        value: info
+      - key: RATE_LIMIT_MAX
         value: "20"
+      - key: CORS_ORIGINS
+        value: "*"
