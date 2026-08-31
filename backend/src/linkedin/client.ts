@@ -89,8 +89,11 @@ export class LinkedInClient {
     }
   }
 
-  /** Fetch a profile's mwlite HTML. Returns the raw HTML body on success. */
-  async fetchProfileHtml(publicIdentifier: string): Promise<string> {
+  /** Fetch a profile's mwlite HTML. Returns the raw HTML body on success,
+   * along with the final URL the 200 was actually served from (after any
+   * redirects) -- see ProfileService for why that URL matters even when
+   * the HTML itself carries no canonical/og:url tag. */
+  async fetchProfileHtml(publicIdentifier: string): Promise<{ html: string; finalUrl: string }> {
     let url = `https://www.linkedin.com/in/${publicIdentifier}/`;
     const firstUrl = url;
 
@@ -125,7 +128,7 @@ export class LinkedInClient {
       await this.storeSetCookies(url, response);
 
       if (response.status === 200) {
-        return await response.text();
+        return { html: await response.text(), finalUrl: url };
       }
       if (response.status === 404) {
         throw Errors.profileNotFound();

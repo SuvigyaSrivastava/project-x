@@ -73,7 +73,46 @@ Three quirks are handled explicitly:
 
 No CAPTCHA bypass. No TLS fingerprint impersonation. No proxy rotation. No login automation. A phone user-agent asking for the mobile version of a public page is normal client behavior — the same category as a responsive site serving different markup to different devices — not an evasion technique, and the client stops there. If LinkedIn redirects to a login or checkpoint wall, it's surfaced as a clear error; nothing tries to solve it.
 
+## Live deployment
+
+| | URL |
+|---|---|
+| Frontend | [frontend-teal-omega-81.vercel.app](https://frontend-teal-omega-81.vercel.app/) |
+| Backend API | [project-x-z8lf.onrender.com](https://project-x-z8lf.onrender.com) (health: `/api/health`) |
+
+**Keeping the backend awake:** the backend runs on Render's free tier, which sleeps after 15 minutes of inactivity -- the first request after a quiet spell takes ~50s while the instance wakes (the frontend's error message already accounts for this, see `page.tsx`). Render's own scheduling can't ping more often than hourly, which wouldn't be enough to outrun a 15-minute sleep window, so an external uptime-monitoring service (e.g. [cron-job.org](https://cron-job.org) or [UptimeRobot](https://uptimerobot.com)) pings `/api/health` every 5-10 minutes to keep the instance warm. This is a free-tier workaround, not a guarantee -- the honest fix is upgrading to a paid Render plan, which doesn't sleep on idle at all.
+
 ## Architecture
+
+```mermaid
+flowchart LR
+    subgraph Client
+        Browser["Browser"]
+    end
+
+    subgraph Vercel["Vercel — frontend/"]
+        FE["Next.js app<br/>(static + client-side fetch)"]
+    end
+
+    subgraph Render["Render — backend/"]
+        API["Express API<br/>/api/profile · /api/health"]
+    end
+
+    subgraph LinkedIn["linkedin.com"]
+        MW["mwlite profile page"]
+    end
+
+    Browser -- "loads page" --> FE
+    FE -- "GET /api/profile?url=..." --> API
+    API -- "mwlite fetch\n(cookie jar, mobile UA)" --> MW
+    MW -- "server-rendered HTML" --> API
+    API -- "structured JSON\n(cached, warnings[])" --> FE
+    FE -- "rendered profile card" --> Browser
+```
+
+The backend never exposes the LinkedIn cookie to the frontend or the browser -- `NEXT_PUBLIC_API_BASE_URL` is the only thing the frontend knows about the backend, and the frontend calls it directly (no server-side proxy hop), so the backend's own per-IP rate limit and CORS allowlist are what stand between the public internet and LinkedIn.
+
+### Backend request flow
 
 ```
 caller
@@ -242,7 +281,7 @@ backend/
       service.ts                orchestration: breaker -> pacing -> cache -> fetch -> parse
     utils/                      circuitBreaker, tokenBucket, ttlCache, logger, apiError
     types/profile.ts            the public response schema
-    __tests__/                  28 tests: url parsing, HTML parsing, HTTP API
+    __tests__/                  36 tests: url parsing, HTML parsing, HTTP API, architecture guard
 
 frontend/
   src/app/page.tsx              the search page
@@ -267,7 +306,7 @@ docker run -p 4000:4000 --env-file .env linkedin-profile-api
 
 ```bash
 cd backend
-npm test        # 28 tests: URL parsing, HTML parsing, HTTP API -- offline, no credentials
+npm test        # 36 tests: URL parsing, HTML parsing, HTTP API, architecture guard -- offline, no credentials
 npm run typecheck
 npm run build    # tsc compiles cleanly
 ```
@@ -286,6 +325,7 @@ The cookie only ever comes from the environment — never logged (pino redacts `
 - **Contact info is not fetched** — it's the most sensitive part of a profile and isn't required by the brief.
 - **The cache, rate limiter, and circuit breaker are process-local**, same trade-off as the previous iteration. Horizontal scale means moving them to a shared store (Redis) — `TtlCache`'s interface was kept narrow for that reason.
 - **`MOCK_MODE` data is synthetic** — it proves the pipeline, not that every real-world markup quirk is handled.
+- **The identity check can still be silently bypassed, and this is an open gap, not a resolved one.** Live testing against the deployed backend found a real case: requesting one slug returned a different, unrelated real person's data, with only a soft warning, no rejection. A fix was added (`service.ts` now also checks the URL LinkedIn's response was actually served from, not just the HTML's own canonical/og:url tag) and it does catch a *redirect-based* substitution. It does **not** catch the case actually observed live: LinkedIn returning `200` at the exact URL requested, with a different profile's HTML, no redirect, and no canonical/og:url tag -- there is no header- or meta-tag-level signal left to check in that case. The remaining option is a content-based heuristic (e.g. comparing the requested slug against the parsed page's own name), deliberately not added yet: name-matching is fuzzy (nicknames, legal-name changes, transliteration) and a heuristic that's wrong in the other direction -- rejecting a real profile -- has its own cost. Until this is closed, treat any response for a slug you can't independently confirm as unverified, regardless of the `warnings[]` array being empty.
 
 ## Legal and ethical note
 
